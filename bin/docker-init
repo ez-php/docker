@@ -1,0 +1,74 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * docker-init — copies stubs into the current project directory.
+ *
+ * Reads the package name from composer.json to replace {{MODULE_NAME}} placeholders.
+ * Skips files that already exist (safe to re-run without overwriting customisations).
+ *
+ * Usage:
+ *   vendor/bin/docker-init
+ *   php vendor/ez-php/docker/bin/docker-init
+ */
+
+$projectRoot = (string) getcwd();
+$stubsDir    = __DIR__ . '/../stubs';
+
+// Resolve module name from project composer.json
+$moduleName     = 'app';
+$composerFile   = $projectRoot . '/composer.json';
+
+if (file_exists($composerFile)) {
+    /** @var array{name?: string} $composer */
+    $composer = json_decode((string) file_get_contents($composerFile), true);
+
+    if (isset($composer['name']) && is_string($composer['name'])) {
+        // "ez-php/cache" → "cache"
+        $parts      = explode('/', $composer['name']);
+        $moduleName = end($parts);
+    }
+}
+
+echo "[docker:init] Module: {$moduleName}\n\n";
+
+$copied  = 0;
+$skipped = 0;
+
+/** @var RecursiveIteratorIterator<RecursiveDirectoryIterator> $iterator */
+$iterator = new RecursiveIteratorIterator(
+    new RecursiveDirectoryIterator($stubsDir, FilesystemIterator::SKIP_DOTS),
+    RecursiveIteratorIterator::SELF_FIRST,
+);
+
+foreach ($iterator as $item) {
+    /** @var SplFileInfo $item */
+    $relativePath = substr((string) $item->getPathname(), strlen($stubsDir) + 1);
+    $targetPath   = $projectRoot . '/' . $relativePath;
+
+    if ($item->isDir()) {
+        if (!is_dir($targetPath)) {
+            mkdir($targetPath, 0o755, true);
+        }
+
+        continue;
+    }
+
+    if (file_exists($targetPath)) {
+        echo "[docker:init] skip   {$relativePath}\n";
+        $skipped++;
+
+        continue;
+    }
+
+    $content = (string) file_get_contents((string) $item->getPathname());
+    $content = str_replace('{{MODULE_NAME}}', $moduleName, $content);
+
+    file_put_contents($targetPath, $content);
+    echo "[docker:init] copy   {$relativePath}\n";
+    $copied++;
+}
+
+echo "\n[docker:init] Done. {$copied} file(s) copied, {$skipped} skipped.\n";
