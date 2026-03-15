@@ -2,11 +2,8 @@ name: Publish Base Image
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'Dockerfile'
-      - 'image/**'
+    tags:
+      - 'v*'
 
 jobs:
   publish:
