@@ -120,13 +120,14 @@ image/
 ├── php.ini                         — Dev PHP settings baked into the base image
 └── container-start.sh             — Default entrypoint: composer install + sleep infinity
 stubs/
-├── Dockerfile                     — Module stub: FROM au9500/php:8.5
-├── docker-compose.yml             — App service only (no external services)
+├── docker-compose.yml             — App service; references docker/app/Dockerfile
 ├── docker-compose.mysql.yml       — MySQL service addon
 ├── docker-compose.redis.yml       — Redis service addon
 ├── .env.example                   — Env var template with commented-out optional sections
 ├── start.sh                       — Convenience script: copy .env, docker compose up, exec shell
 └── docker/
+    ├── app/
+    │   └── Dockerfile             — Module stub: FROM au9500/php:8.5 + CMD
     └── db/
         └── create-db.sh          — MySQL init: creates main + testing databases, grants privileges
 bin/
