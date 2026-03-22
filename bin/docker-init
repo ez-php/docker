@@ -11,28 +11,70 @@ declare(strict_types=1);
  *
  * Usage:
  *   vendor/bin/docker-init
+ *   vendor/bin/docker-init --services=mysql
+ *   vendor/bin/docker-init --services=redis
+ *   vendor/bin/docker-init --services=mysql,redis
  *   php vendor/ez-php/docker/bin/docker-init
+ *
+ * With --services, the requested service definitions are merged directly into
+ * docker-compose.yml and the relevant sections in .env.example are uncommented.
+ * The separate addon stubs (docker-compose.mysql.yml, docker-compose.redis.yml)
+ * are skipped since their content is already incorporated.
  */
 
 $projectRoot = (string) getcwd();
 $stubsDir    = __DIR__ . '/../stubs';
 
-// Resolve module name from project composer.json
-$moduleName     = 'app';
-$composerFile   = $projectRoot . '/composer.json';
+// ─── Module name ─────────────────────────────────────────────────────────────
+
+$moduleName   = 'app';
+$composerFile = $projectRoot . '/composer.json';
 
 if (file_exists($composerFile)) {
     /** @var array{name?: string} $composer */
     $composer = json_decode((string) file_get_contents($composerFile), true);
 
     if (isset($composer['name']) && is_string($composer['name'])) {
-        // "ez-php/cache" → "cache"
         $parts      = explode('/', $composer['name']);
         $moduleName = end($parts);
     }
 }
 
-echo "[docker:init] Module: {$moduleName}\n\n";
+// ─── --services flag ─────────────────────────────────────────────────────────
+
+/** @var list<string> $argv */
+$services = [];
+
+foreach ($argv as $arg) {
+    if (str_starts_with($arg, '--services=')) {
+        $raw      = substr($arg, strlen('--services='));
+        $services = array_values(array_filter(array_map('trim', explode(',', $raw))));
+        break;
+    }
+}
+
+$knownServices = ['mysql', 'redis'];
+
+foreach ($services as $service) {
+    if (!in_array($service, $knownServices, true)) {
+        echo "[docker:init] Unknown service: {$service}. Supported: " . implode(', ', $knownServices) . "\n";
+        exit(1);
+    }
+}
+
+echo "[docker:init] Module: {$moduleName}\n";
+
+if ($services !== []) {
+    echo "[docker:init] Services: " . implode(', ', $services) . "\n";
+}
+
+echo "\n";
+
+// ─── Addon stubs (merged into docker-compose.yml when --services is used) ────
+
+$addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml'];
+
+// ─── Copy loop ───────────────────────────────────────────────────────────────
 
 $copied  = 0;
 $skipped = 0;
@@ -56,15 +98,30 @@ foreach ($iterator as $item) {
         continue;
     }
 
+    // When --services is used, skip the individual addon stubs — they are merged
+    // into docker-compose.yml instead of being copied as separate override files.
+    if ($services !== [] && in_array(basename($relativePath), $addonStubs, true)) {
+        echo "[docker:init] skip   {$relativePath} (merged via --services)\n";
+        $skipped++;
+        continue;
+    }
+
     if (file_exists($targetPath)) {
         echo "[docker:init] skip   {$relativePath}\n";
         $skipped++;
-
         continue;
     }
 
     $content = (string) file_get_contents((string) $item->getPathname());
     $content = str_replace('{{MODULE_NAME}}', $moduleName, $content);
+
+    if (basename($relativePath) === 'docker-compose.yml' && $services !== []) {
+        $content = buildCompose($content, $stubsDir, $moduleName, $services);
+    }
+
+    if (basename($relativePath) === '.env.example' && $services !== []) {
+        $content = uncommentEnvSections($content, $services);
+    }
 
     file_put_contents($targetPath, $content);
     echo "[docker:init] copy   {$relativePath}\n";
@@ -72,3 +129,195 @@ foreach ($iterator as $item) {
 }
 
 echo "\n[docker:init] Done. {$copied} file(s) copied, {$skipped} skipped.\n";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Build a merged docker-compose.yml by injecting service definitions from addon stubs.
+ *
+ * @param string       $base       Base docker-compose.yml content (placeholders already replaced).
+ * @param string       $stubsDir   Path to the stubs directory.
+ * @param string       $moduleName Module name for placeholder replacement in addon stubs.
+ * @param list<string> $services   Services to include (e.g. ['mysql', 'redis']).
+ *
+ * @return string
+ */
+function buildCompose(string $base, string $stubsDir, string $moduleName, array $services): string
+{
+    $dependsOnEntries = [];
+    $serviceBlocks    = '';
+    $volumeBlocks     = '';
+
+    foreach ($services as $service) {
+        $file = match ($service) {
+            'mysql' => $stubsDir . '/docker-compose.mysql.yml',
+            'redis' => $stubsDir . '/docker-compose.redis.yml',
+            default => null,
+        };
+
+        if ($file === null || !is_file($file)) {
+            continue;
+        }
+
+        $stub = (string) file_get_contents($file);
+        $stub = str_replace('{{MODULE_NAME}}', $moduleName, $stub);
+
+        $entries = extractDependsOnEntries($stub);
+
+        if ($entries !== '') {
+            $dependsOnEntries[] = $entries;
+        }
+
+        $serviceBlocks .= extractServiceBlock($stub);
+        $volumeBlocks  .= extractVolumesBlock($stub);
+    }
+
+    if ($dependsOnEntries !== []) {
+        $combined = implode("\n", $dependsOnEntries);
+        $base     = rtrim($base) . "\n    depends_on:\n" . $combined . "\n";
+    }
+
+    return $base . $serviceBlocks . $volumeBlocks;
+}
+
+/**
+ * Extract the 6-space-indented depends_on entries from the app service section of an addon stub.
+ *
+ * Example output: "      db:\n        condition: service_healthy"
+ *
+ * @param string $stub Addon stub content.
+ *
+ * @return string Entries joined by newline, or empty string if none found.
+ */
+function extractDependsOnEntries(string $stub): string
+{
+    $lines     = explode("\n", $stub);
+    $capturing = false;
+    $entries   = [];
+
+    foreach ($lines as $line) {
+        if ($line === '    depends_on:') {
+            $capturing = true;
+            continue;
+        }
+
+        if ($capturing) {
+            if (str_starts_with($line, '      ')) {
+                $entries[] = $line;
+            } else {
+                break;
+            }
+        }
+    }
+
+    return implode("\n", $entries);
+}
+
+/**
+ * Extract the service definition block from an addon stub, excluding the leading
+ * 'services:', blank lines, and 'app:' section, and stopping before 'volumes:'.
+ *
+ * @param string $stub Addon stub content.
+ *
+ * @return string Service block starting with a blank line, or empty string.
+ */
+function extractServiceBlock(string $stub): string
+{
+    $lines  = explode("\n", $stub);
+    $result = [];
+    $skip   = true;
+
+    foreach ($lines as $line) {
+        if ($skip) {
+            // Skip 'services:', blank lines, and the app: section (4-space-indented content)
+            if ($line === 'services:' || $line === '' || $line === '  app:' || str_starts_with($line, '    ')) {
+                continue;
+            }
+
+            $skip = false;
+        }
+
+        if ($line === 'volumes:') {
+            break;
+        }
+
+        $result[] = $line;
+    }
+
+    if ($result === []) {
+        return '';
+    }
+
+    return "\n" . rtrim(implode("\n", $result)) . "\n";
+}
+
+/**
+ * Extract the volumes section from an addon stub, if present.
+ *
+ * @param string $stub Addon stub content.
+ *
+ * @return string Volumes block starting with a blank line, or empty string.
+ */
+function extractVolumesBlock(string $stub): string
+{
+    $lines     = explode("\n", $stub);
+    $result    = [];
+    $capturing = false;
+
+    foreach ($lines as $line) {
+        if ($line === 'volumes:') {
+            $capturing = true;
+        }
+
+        if ($capturing) {
+            $result[] = $line;
+        }
+    }
+
+    if ($result === []) {
+        return '';
+    }
+
+    return "\n" . rtrim(implode("\n", $result)) . "\n";
+}
+
+/**
+ * Uncomment service-specific variable lines in .env.example content.
+ *
+ * Section boundaries are detected by the comment headers:
+ *   "# Uncomment and configure if this module requires MySQL:"
+ *   "# Uncomment and configure if this module requires Redis:"
+ * A blank line terminates the current section.
+ *
+ * @param string       $content  .env.example file content.
+ * @param list<string> $services Services to uncomment (e.g. ['mysql', 'redis']).
+ *
+ * @return string Modified content.
+ */
+function uncommentEnvSections(string $content, array $services): string
+{
+    $lines          = explode("\n", $content);
+    $result         = [];
+    $currentSection = null;
+
+    foreach ($lines as $line) {
+        if (str_contains($line, 'requires MySQL:')) {
+            $currentSection = 'mysql';
+        } elseif (str_contains($line, 'requires Redis:')) {
+            $currentSection = 'redis';
+        } elseif (trim($line) === '') {
+            $currentSection = null;
+        }
+
+        if ($currentSection !== null && in_array($currentSection, $services, true)) {
+            if (preg_match('/^# ([A-Z_]+=.*)$/', $line, $matches)) {
+                $result[] = $matches[1];
+                continue;
+            }
+        }
+
+        $result[] = $line;
+    }
+
+    return implode("\n", $result);
+}
