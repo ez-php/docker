@@ -1,0 +1,131 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * update-docker — updates existing Docker stub files in the current project.
+ *
+ * Unlike docker-init (which only copies files that don't exist yet), this script
+ * overwrites existing files with the latest stub content. Files that do not yet
+ * exist in the target are left untouched — use docker-init to add new files.
+ *
+ * Usage:
+ *   vendor/bin/update-docker              # update all existing stub files
+ *   vendor/bin/update-docker --dry-run    # preview changes without writing
+ *
+ * Exit codes:
+ *   0 — success (no changes or changes applied)
+ *   1 — unknown flag
+ */
+
+$projectRoot = (string) getcwd();
+$stubsDir    = __DIR__ . '/../stubs';
+
+// ─── Module name ─────────────────────────────────────────────────────────────
+
+$moduleName   = 'app';
+$composerFile = $projectRoot . '/composer.json';
+
+if (file_exists($composerFile)) {
+    /** @var array{name?: string} $composer */
+    $composer = json_decode((string) file_get_contents($composerFile), true);
+
+    if (isset($composer['name']) && is_string($composer['name'])) {
+        $parts      = explode('/', $composer['name']);
+        $moduleName = end($parts);
+    }
+}
+
+// ─── Flags ───────────────────────────────────────────────────────────────────
+
+/** @var list<string> $argv */
+$dryRun = false;
+
+foreach ($argv as $arg) {
+    if ($arg === '--dry-run') {
+        $dryRun = true;
+        continue;
+    }
+
+    if (str_starts_with($arg, '-') && $arg !== $argv[0]) {
+        echo "[docker:update] Unknown flag: {$arg}\n";
+        exit(1);
+    }
+}
+
+// ─── Header ──────────────────────────────────────────────────────────────────
+
+echo "[docker:update] Module: {$moduleName}\n";
+
+if ($dryRun) {
+    echo "[docker:update] Mode:   dry-run (no files will be written)\n";
+}
+
+echo "\n";
+
+// ─── Addon stubs (not auto-updated — only used as merge sources) ──────────────
+
+$addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml'];
+
+// ─── Update loop ─────────────────────────────────────────────────────────────
+
+$updated   = 0;
+$unchanged = 0;
+$skipped   = 0;
+
+/** @var RecursiveIteratorIterator<RecursiveDirectoryIterator> $iterator */
+$iterator = new RecursiveIteratorIterator(
+    new RecursiveDirectoryIterator($stubsDir, FilesystemIterator::SKIP_DOTS),
+    RecursiveIteratorIterator::SELF_FIRST,
+);
+
+foreach ($iterator as $item) {
+    /** @var SplFileInfo $item */
+    $relativePath = substr((string) $item->getPathname(), strlen($stubsDir) + 1);
+    $targetPath   = $projectRoot . '/' . $relativePath;
+
+    if ($item->isDir()) {
+        continue;
+    }
+
+    // Addon stubs are merge sources, not standalone files — skip them.
+    if (in_array(basename($relativePath), $addonStubs, true)) {
+        continue;
+    }
+
+    // Only update files that already exist in the target.
+    if (!file_exists($targetPath)) {
+        echo "[docker:update] skip    {$relativePath} (not present — run docker-init to add)\n";
+        $skipped++;
+        continue;
+    }
+
+    $newContent = (string) file_get_contents((string) $item->getPathname());
+    $newContent = str_replace('{{MODULE_NAME}}', $moduleName, $newContent);
+
+    $oldContent = (string) file_get_contents($targetPath);
+
+    if ($oldContent === $newContent) {
+        echo "[docker:update] same    {$relativePath}\n";
+        $unchanged++;
+        continue;
+    }
+
+    if ($dryRun) {
+        echo "[docker:update] changed {$relativePath} (would update)\n";
+    } else {
+        file_put_contents($targetPath, $newContent);
+        echo "[docker:update] updated {$relativePath}\n";
+    }
+
+    $updated++;
+}
+
+echo "\n";
+
+if ($dryRun) {
+    echo "[docker:update] Dry-run complete. {$updated} file(s) would be updated, {$unchanged} unchanged, {$skipped} skipped.\n";
+} else {
+    echo "[docker:update] Done. {$updated} file(s) updated, {$unchanged} unchanged, {$skipped} skipped.\n";
+}

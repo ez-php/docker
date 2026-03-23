@@ -69,6 +69,17 @@ composer docker:init
 
 Existing files are never overwritten — safe to re-run after customisation.
 
+### Updating existing Docker files
+
+When stubs change (e.g. new base image version, updated `start.sh`), run `update-docker` to sync existing files:
+
+```bash
+vendor/bin/update-docker            # apply updates
+vendor/bin/update-docker --dry-run  # preview changes without writing
+```
+
+Files that do not yet exist in the target are skipped — use `docker-init` to add new files.
+
 ### `{{MODULE_NAME}}` placeholder
 
 The script reads the package name from `composer.json` and replaces all `{{MODULE_NAME}}` occurrences. For a package named `ez-php/cache`, it becomes `cache`, resulting in container names like `ez-php-cache-app`.

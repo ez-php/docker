@@ -8,10 +8,12 @@
         "php": "^8.5"
     },
     "bin": [
-        "bin/docker-init"
+        "bin/docker-init",
+        "bin/update-docker"
     ],
     "scripts": {
-        "docker:init": "php bin/docker-init"
+        "docker:init": "php bin/docker-init",
+        "docker:update": "php bin/update-docker"
     },
     "config": {
         "sort-packages": true
