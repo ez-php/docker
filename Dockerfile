@@ -2,6 +2,7 @@ FROM php:8.5-cli
 
 ARG WWWUSER=1000
 ARG WWWGROUP=1000
+ARG WITH_NODE=false
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -26,6 +27,13 @@ RUN pecl install pcov \
 # Install Xdebug for step debugging
 RUN pecl install xdebug \
     && docker-php-ext-enable xdebug
+
+# Install Node.js 20 (optional — set WITH_NODE=true to activate)
+RUN if [ "$WITH_NODE" = "true" ]; then \
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+      && apt-get install -y nodejs \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
