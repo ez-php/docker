@@ -1,6 +1,6 @@
 {
     "name": "ez-php/docker",
-    "version": "1.9.1",
+    "version": "1.9.2",
     "description": "Docker base image source and scaffolding stubs for ez-php modules and projects",
     "type": "library",
     "license": "MIT",
