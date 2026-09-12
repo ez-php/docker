@@ -43,6 +43,18 @@ composer require --dev ez-php/docker
 vendor/bin/docker-init
 ```
 
+Pass `--services` to merge service definitions straight into `docker-compose.yml`
+and uncomment the matching block in `.env.example`, instead of doing it by hand:
+
+```bash
+vendor/bin/docker-init --services=mysql
+vendor/bin/docker-init --services=redis
+vendor/bin/docker-init --services=meilisearch
+vendor/bin/docker-init --services=mysql,meilisearch
+```
+
+Supported services: `mysql`, `redis`, `meilisearch`.
+
 Or via Composer script (add to your project's `composer.json`):
 
 ```json
@@ -63,6 +75,7 @@ composer docker:init
 | `docker-compose.yml` | App service only |
 | `docker-compose.mysql.yml` | MySQL service addon (merge as needed) |
 | `docker-compose.redis.yml` | Redis service addon (merge as needed) |
+| `docker-compose.meilisearch.yml` | Meilisearch service addon (merge as needed) |
 | `.env.example` | Env var template |
 | `start.sh` | Convenience script: copies `.env`, starts compose, opens shell |
 | `docker/db/create-db.sh` | MySQL init script: creates main + testing databases |
@@ -86,13 +99,15 @@ The script reads the package name from `composer.json` and replaces all `{{MODUL
 
 ### Combining compose files
 
-For a module that needs MySQL and Redis:
+If you scaffolded without `--services`, the addons stay as separate files and can
+be layered with `-f`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.mysql.yml -f docker-compose.redis.yml up -d
 ```
 
-Or merge the relevant services manually into `docker-compose.yml`.
+Or merge the relevant services manually into `docker-compose.yml`. With
+`--services` this is already done for you.
 
 ---
 

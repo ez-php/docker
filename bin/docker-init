@@ -14,6 +14,7 @@ declare(strict_types=1);
  *   vendor/bin/docker-init --services=mysql
  *   vendor/bin/docker-init --services=redis
  *   vendor/bin/docker-init --services=mysql,redis
+ *   vendor/bin/docker-init --services=meilisearch
  *   php vendor/ez-php/docker/bin/docker-init
  *
  * With --services, the requested service definitions are merged directly into
@@ -53,7 +54,7 @@ foreach ($argv as $arg) {
     }
 }
 
-$knownServices = ['mysql', 'redis'];
+$knownServices = ['mysql', 'redis', 'meilisearch'];
 
 foreach ($services as $service) {
     if (!in_array($service, $knownServices, true)) {
@@ -72,7 +73,7 @@ echo "\n";
 
 // ─── Addon stubs (merged into docker-compose.yml when --services is used) ────
 
-$addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml'];
+$addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml', 'docker-compose.meilisearch.yml'];
 
 // ─── Copy loop ───────────────────────────────────────────────────────────────
 
@@ -152,6 +153,7 @@ function buildCompose(string $base, string $stubsDir, string $moduleName, array 
         $file = match ($service) {
             'mysql' => $stubsDir . '/docker-compose.mysql.yml',
             'redis' => $stubsDir . '/docker-compose.redis.yml',
+            'meilisearch' => $stubsDir . '/docker-compose.meilisearch.yml',
             default => null,
         };
 
@@ -305,6 +307,8 @@ function uncommentEnvSections(string $content, array $services): string
             $currentSection = 'mysql';
         } elseif (str_contains($line, 'requires Redis:')) {
             $currentSection = 'redis';
+        } elseif (str_contains($line, 'requires Meilisearch:')) {
+            $currentSection = 'meilisearch';
         } elseif (trim($line) === '') {
             $currentSection = null;
         }

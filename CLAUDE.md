@@ -26,15 +26,20 @@ docker compose exec app composer full
 ```
 
 Executes in order:
-1. `phpstan analyse` — static analysis, level 9, config: `phpstan.neon`
-2. `php-cs-fixer fix` — auto-fixes style (`@PSR12` + `@PHP83Migration` + strict rules)
-3. `phpunit` — all tests with coverage
+1. `sync_guidelines.php --check` — fails if any `CLAUDE.md` has drifted from this file
+2. `check_test_classes.php` — fails on a duplicate test class name (all packages share the `Tests\` namespace, so a collision is a fatal error in the aggregated run, not a test failure)
+3. `phpstan analyse` — static analysis, level 9, config: `phpstan.neon`
+4. `php-cs-fixer fix` — auto-fixes style (`@PSR12` + `@PHP83Migration` + strict rules)
+   *(Note: `@PHP85Migration` does not exist yet in php-cs-fixer; `@PHP83Migration` is the highest available and is used intentionally even though the project targets PHP 8.5)*
+5. `phpunit` — all tests with coverage
 
 Individual commands when needed:
 ```
-composer analyse   # PHPStan only
-composer cs        # CS Fixer only
-composer test      # PHPUnit only
+composer analyse             # PHPStan only
+composer cs                  # CS Fixer only
+composer test                # PHPUnit only
+composer guidelines:check    # CLAUDE.md drift only
+composer test-classes:check  # duplicate test class names only
 ```
 
 **PHPStan:** never suppress with `@phpstan-ignore-line` — always fix the root cause.
@@ -118,7 +123,47 @@ Every module `CLAUDE.md` must follow this exact structure:
    - Testing approach and infrastructure requirements (MySQL, Redis, etc.)
    - What does **not** belong in this module
 
-### 3 — Docker scaffold
+**Do not edit part 1 by hand.** It is generated from `CODING_GUIDELINES.md` by
+`sync_guidelines.php` at the project root:
+
+```
+php sync_guidelines.php            # rewrite every out-of-sync CLAUDE.md
+php sync_guidelines.php --check    # report drift, exit 1 if any (CI / pre-commit)
+```
+
+Edit `CODING_GUIDELINES.md`, then run the script — it replaces everything before the
+`# Package:` / `# Directory:` / `# Project:` heading and preserves the hand-written
+section below it byte-for-byte. Editing a single copy only creates drift; before this
+script existed, all 40 copies had diverged.
+
+### 3 — Scaffolding a new module
+
+`make_module.php` at the project root writes the required-file set and the monorepo
+wiring in one step, wrapping `docker-init` for the Docker subset:
+
+```
+composer module:make <name> -- --description="..."
+php make_module.php <name> --description="..." --services=mysql,redis
+```
+
+`<name>` is the kebab-case package name; the namespace is derived as
+`EzPhp\<PascalCase>` unless `--namespace=` overrides it (`bignum` → `BigNum` and
+`opcache` → `OPCache` are existing exceptions the guess gets wrong).
+
+It writes `modules/<name>/` and registers the module in the four places the monorepo
+needs it — root `composer.json` (`autoload.psr-4`), `phpstan.neon`, `phpunit.xml`
+(test suite **and** coverage source), and `packages.sh` (alphabetical position).
+
+Two things stay manual on purpose:
+
+- **`CLAUDE.md` part 1** — only the `# Package:` section is generated. Run
+  `composer guidelines:sync` afterwards; baking a guidelines copy into the generator
+  would recreate the drift the sync script exists to prevent.
+- **The host-port table below** (`--services` only) — editing it marks all ~40
+  `CLAUDE.md` copies as drifted at once, so the next `composer full` would fail for
+  a brand-new module. The generator prints which ports to claim instead.
+
+### 4 — Docker scaffold
 
 Run from the new module root (requires `"ez-php/docker": "^1.0"` in `require-dev`):
 
@@ -128,25 +173,39 @@ vendor/bin/docker-init
 
 This copies `Dockerfile`, `docker-compose.yml`, `.env.example`, `start.sh`, and `docker/` into the module, replacing `{{MODULE_NAME}}` placeholders. Existing files are never overwritten.
 
+Pass `--services` to merge MySQL/Redis/Meilisearch service definitions directly into `docker-compose.yml` and uncomment the matching sections in `.env.example`, instead of adapting them by hand afterward:
+
+```
+vendor/bin/docker-init --services=mysql
+vendor/bin/docker-init --services=redis
+vendor/bin/docker-init --services=meilisearch
+vendor/bin/docker-init --services=mysql,redis
+```
+
 After scaffolding:
 
-1. Adapt `docker-compose.yml` — add or remove services (MySQL, Redis) as needed
+1. Adapt `docker-compose.yml` — add or remove services (MySQL, Redis, Meilisearch) as needed
 2. Adapt `.env.example` — fill in connection defaults matching the services above
 3. Assign a unique host port for each exposed service (see table below)
 
 **Allocated host ports:**
 
-| Package | `DB_HOST_PORT` (MySQL) | `REDIS_PORT` |
-|---|---|---|
-| root (`ez-php-project`) | 3306 | 6379 |
-| `ez-php/framework` | 3307 | — |
-| `ez-php/orm` | 3309 | — |
-| `ez-php/cache` | — | 6380 |
-| **next free** | **3311** | **6383** |
+| Package | `DB_HOST_PORT` (MySQL) | `REDIS_PORT` | `MEILISEARCH_PORT` |
+|---|---|---|---|
+| root (`ez-php-project`) | 3306 | 6379 | 7700 |
+| `ez-php/framework` | 3307 | — | — |
+| `ez-php/orm` | 3309 | — | — |
+| `ez-php/cache` | — | 6380 | — |
+| `ez-php/queue` | 3310 | 6381 | — |
+| `ez-php/rate-limiter` | — | 6382 | — |
+| `ez-php/search` | — | — | 7701 |
+| **next free** | **3311** | **6383** | **7702** |
 
 Only set a port for services the module actually uses. Modules without external services need no port config.
 
-### 4 — Monorepo scripts
+> The `MEILISEARCH_PORT` column is the **host** port. Inside a Compose network the service is always reachable at `http://meilisearch:7700` regardless of the host mapping — only publish-side ports need to be unique.
+
+### 5 — Monorepo scripts
 
 `packages.sh` at the project root is the **central package registry**. Both `push_all.sh` and `update_all.sh` source it — the package list lives in exactly one place.
 
@@ -174,11 +233,14 @@ stubs/
 ├── docker-compose.yml             — App service; references docker/app/Dockerfile
 ├── docker-compose.mysql.yml       — MySQL service addon
 ├── docker-compose.redis.yml       — Redis service addon
+├── docker-compose.meilisearch.yml — Meilisearch service addon
 ├── .env.example                   — Env var template with commented-out optional sections
 ├── start.sh                       — Convenience script: copy .env, docker compose up, exec shell
 └── docker/
     ├── app/
-    │   └── Dockerfile             — Module stub: FROM au9500/php:8.5 + CMD
+    │   ├── Dockerfile             — Module stub: FROM au9500/php:8.5 + CMD
+    │   ├── container-start.sh     — Module stub: composer install + sleep infinity
+    │   └── php.ini                — Module stub: memory_limit, display_errors, xdebug.mode
     └── db/
         └── create-db.sh          — MySQL init: creates main + testing databases, grants privileges
 bin/
@@ -208,7 +270,7 @@ PHP executable (listed in `"bin"` in `composer.json`). When run from a project r
 
 Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced by `docker-init` with the derived package name (e.g., `ez-php/cache` → `cache`).
 
-- `docker-compose.mysql.yml` and `docker-compose.redis.yml` are addons — merge selectively into `docker-compose.yml` or use `-f` flags
+- `docker-compose.mysql.yml`, `docker-compose.redis.yml` and `docker-compose.meilisearch.yml` are addons — merged into `docker-compose.yml` by `--services`, or usable via `-f` flags
 - `docker/db/create-db.sh` is only needed when the MySQL stub is used
 
 ---
@@ -220,6 +282,7 @@ Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced b
 - **Both `pcov` and `xdebug`** — `pcov` is faster for coverage-only runs; `xdebug` is needed for step debugging. Including both avoids forcing a choice. Coverage tools default to `xdebug` mode; `pcov` can be activated via `XDEBUG_MODE=off`.
 - **`container-start.sh` baked in** — The default `sleep infinity` entrypoint means a module container stays alive for `docker compose exec` without running a server. The full app overrides this with supervisord in its own Dockerfile.
 - **`{{MODULE_NAME}}` placeholder** — Container names must be unique across modules on the same host. The placeholder is replaced at init time from `composer.json`. No interactive prompts.
+- **Service addons are data, not code paths** — Adding a service means dropping a `docker-compose.<name>.yml` stub, adding a commented block to `.env.example` marked `requires <Name>:`, and listing the name in `$knownServices`/`$addonStubs`/`buildCompose()`. Meilisearch was added this way; its stub mirrors the working configuration in `modules/search/docker-compose.yml` rather than being invented, so a scaffolded module matches a setup known to run.
 - **Stubs are one-time scaffolding** — Once copied, files belong to the module and are edited freely. Updates to stubs only affect new modules. No auto-sync mechanism.
 - **No PHP source code in this package** — `bin/docker-init` is a plain PHP script, not a class. There is nothing to PHPStan, CS-fix, or unit test in the traditional sense. The package intentionally has no `src/`, `phpstan.neon`, `phpunit.xml`, or `.php-cs-fixer.php`.
 
@@ -231,7 +294,9 @@ This package has no PHP library code to unit test. Validation is manual:
 
 - Build the base image locally: `docker build -t au9500/php:8.5 .`
 - Run `docker run --rm au9500/php:8.5 php -m` to verify all extensions are loaded
-- Run `vendor/bin/docker-init` in a test project and verify files are copied correctly
+- Run `vendor/bin/docker-init` in a throwaway directory containing only a `composer.json` with a `name` field, and verify the copied files
+- For `--services`, check that the merged `docker-compose.yml` is valid YAML and that only the requested sections of `.env.example` were uncommented:
+  `mkdir /tmp/dt && cd /tmp/dt && printf '{"name":"ez-php/demo"}' > composer.json && php .../bin/docker-init --services=mysql,meilisearch`
 
 The `bin/docker-init` script is tested implicitly when scaffolding new modules.
 
