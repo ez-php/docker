@@ -54,6 +54,7 @@ composer test-classes:check  # duplicate test class names only
 - One responsibility per class — keep classes small and focused
 - Constructor injection — no service locator pattern
 - No global state unless intentional and documented
+- Concrete classes are `final` — extend behavior through composition, not inheritance. Exception-hierarchy base classes (e.g. `EzPhpException`, `HttpException`, `CacheException`) are the one carve-out, since they exist specifically to be extended.
 
 **Naming:**
 
@@ -190,20 +191,22 @@ After scaffolding:
 
 **Allocated host ports:**
 
-| Package | `DB_HOST_PORT` (MySQL) | `REDIS_PORT` | `MEILISEARCH_PORT` |
+| Package | `DB_HOST_PORT` (MySQL) | Redis host port | `MEILISEARCH_PORT` |
 |---|---|---|---|
-| root (`ez-php-project`) | 3306 | 6379 | 7700 |
+| root (`ez-php-project`) | 3306 | 6379 (`REDIS_PORT`) | 7700 |
 | `ez-php/framework` | 3307 | — | — |
 | `ez-php/orm` | 3309 | — | — |
-| `ez-php/cache` | — | 6380 | — |
-| `ez-php/queue` | 3310 | 6381 | — |
-| `ez-php/rate-limiter` | — | 6382 | — |
+| `ez-php/cache` | — | 6380 (`REDIS_HOST_PORT`) | — |
+| `ez-php/queue` | 3310 | 6381 (`REDIS_HOST_PORT`) | — |
+| `ez-php/rate-limiter` | — | 6382 (`REDIS_HOST_PORT`) | — |
 | `ez-php/search` | — | — | 7701 |
 | **next free** | **3311** | **6383** | **7702** |
 
 Only set a port for services the module actually uses. Modules without external services need no port config.
 
 > The `MEILISEARCH_PORT` column is the **host** port. Inside a Compose network the service is always reachable at `http://meilisearch:7700` regardless of the host mapping — only publish-side ports need to be unique.
+
+> The "Redis host port" column is likewise the **host**-published port. `ez-php/cache`, `ez-php/queue`, and `ez-php/rate-limiter` map it through a separate `REDIS_HOST_PORT` env var in `docker-compose.yml`, keeping `REDIS_PORT` fixed at `6379` for in-container connections (the app container always reaches Redis at `redis:6379` over the Compose network, regardless of the host mapping) — the root project is the one exception, since it has no host/container split and uses `REDIS_PORT` for both.
 
 ### 5 — Monorepo scripts
 
@@ -284,7 +287,7 @@ Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced b
 - **`{{MODULE_NAME}}` placeholder** — Container names must be unique across modules on the same host. The placeholder is replaced at init time from `composer.json`. No interactive prompts.
 - **Service addons are data, not code paths** — Adding a service means dropping a `docker-compose.<name>.yml` stub, adding a commented block to `.env.example` marked `requires <Name>:`, and listing the name in `$knownServices`/`$addonStubs`/`buildCompose()`. Meilisearch was added this way; its stub mirrors the working configuration in `modules/search/docker-compose.yml` rather than being invented, so a scaffolded module matches a setup known to run.
 - **Stubs are one-time scaffolding** — Once copied, files belong to the module and are edited freely. Updates to stubs only affect new modules. No auto-sync mechanism.
-- **No PHP source code in this package** — `bin/docker-init` is a plain PHP script, not a class. There is nothing to PHPStan, CS-fix, or unit test in the traditional sense. The package intentionally has no `src/`, `phpstan.neon`, `phpunit.xml`, or `.php-cs-fixer.php`.
+- **No PHP library code in this package** — `bin/docker-init` and `bin/update-docker` are plain PHP scripts, not classes, and there is nothing to unit test in the traditional sense. The package intentionally has no `src/`, `phpstan.neon`, or `phpunit.xml`. `.php-cs-fixer.php` (targeting `bin/` only) is present, since those scripts are still real, style-checkable PHP source.
 
 ---
 

@@ -20,11 +20,11 @@ declare(strict_types=1);
  */
 
 $projectRoot = (string) getcwd();
-$stubsDir    = __DIR__ . '/../stubs';
+$stubsDir = __DIR__ . '/../stubs';
 
 // ─── Module name ─────────────────────────────────────────────────────────────
 
-$moduleName   = 'app';
+$moduleName = 'app';
 $composerFile = $projectRoot . '/composer.json';
 
 if (file_exists($composerFile)) {
@@ -32,7 +32,7 @@ if (file_exists($composerFile)) {
     $composer = json_decode((string) file_get_contents($composerFile), true);
 
     if (isset($composer['name']) && is_string($composer['name'])) {
-        $parts      = explode('/', $composer['name']);
+        $parts = explode('/', $composer['name']);
         $moduleName = end($parts);
     }
 }
@@ -70,9 +70,9 @@ $addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml'];
 
 // ─── Update loop ─────────────────────────────────────────────────────────────
 
-$updated   = 0;
+$updated = 0;
 $unchanged = 0;
-$skipped   = 0;
+$skipped = 0;
 
 /** @var RecursiveIteratorIterator<RecursiveDirectoryIterator> $iterator */
 $iterator = new RecursiveIteratorIterator(
@@ -83,7 +83,7 @@ $iterator = new RecursiveIteratorIterator(
 foreach ($iterator as $item) {
     /** @var SplFileInfo $item */
     $relativePath = substr((string) $item->getPathname(), strlen($stubsDir) + 1);
-    $targetPath   = $projectRoot . '/' . $relativePath;
+    $targetPath = $projectRoot . '/' . $relativePath;
 
     if ($item->isDir()) {
         continue;
