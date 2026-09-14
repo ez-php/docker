@@ -15,12 +15,24 @@ declare(strict_types=1);
  *   vendor/bin/docker-init --services=redis
  *   vendor/bin/docker-init --services=mysql,redis
  *   vendor/bin/docker-init --services=meilisearch
+ *   vendor/bin/docker-init --extensions=gmp,bcmath
+ *   vendor/bin/docker-init --extensions=gd,imagick
  *   php vendor/ez-php/docker/bin/docker-init
  *
  * With --services, the requested service definitions are merged directly into
  * docker-compose.yml and the relevant sections in .env.example are uncommented.
  * The separate addon stubs (docker-compose.mysql.yml, docker-compose.redis.yml)
  * are skipped since their content is already incorporated.
+ *
+ * With --extensions, the requested PHP extension install blocks (apt packages +
+ * docker-php-ext-install / pecl lines) are merged directly into docker/app/Dockerfile,
+ * right after the base FROM line, the same way --services merges into
+ * docker-compose.yml. The separate addon stubs (Dockerfile.gmp, Dockerfile.gd, ...)
+ * are skipped since their content is already incorporated. When run from a module
+ * directory inside this monorepo (detected via a sibling packages.sh two levels up),
+ * any extension not already present in the shared root docker/app/Dockerfile is
+ * appended there too, since `composer full` at the root runs against that shared
+ * container, not the module's own image.
  */
 
 $projectRoot = (string) getcwd();
@@ -63,17 +75,45 @@ foreach ($services as $service) {
     }
 }
 
+// ─── --extensions flag ───────────────────────────────────────────────────────
+
+/** @var list<string> $extensions */
+$extensions = [];
+
+foreach ($argv as $arg) {
+    if (str_starts_with($arg, '--extensions=')) {
+        $raw = substr($arg, strlen('--extensions='));
+        $extensions = array_values(array_filter(array_map('trim', explode(',', $raw))));
+        break;
+    }
+}
+
+$knownExtensions = ['bcmath', 'gmp', 'gd', 'imagick'];
+
+foreach ($extensions as $extension) {
+    if (!in_array($extension, $knownExtensions, true)) {
+        echo "[docker:init] Unknown extension: {$extension}. Supported: " . implode(', ', $knownExtensions) . "\n";
+        exit(1);
+    }
+}
+
 echo "[docker:init] Module: {$moduleName}\n";
 
 if ($services !== []) {
     echo '[docker:init] Services: ' . implode(', ', $services) . "\n";
 }
 
+if ($extensions !== []) {
+    echo '[docker:init] Extensions: ' . implode(', ', $extensions) . "\n";
+}
+
 echo "\n";
 
-// ─── Addon stubs (merged into docker-compose.yml when --services is used) ────
+// ─── Addon stubs (merged into docker-compose.yml when --services is used, or ──
+// ─── into docker/app/Dockerfile when --extensions is used) ───────────────────
 
 $addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml', 'docker-compose.meilisearch.yml'];
+$extensionStubs = ['Dockerfile.bcmath', 'Dockerfile.gmp', 'Dockerfile.gd', 'Dockerfile.imagick'];
 
 // ─── Copy loop ───────────────────────────────────────────────────────────────
 
@@ -107,6 +147,15 @@ foreach ($iterator as $item) {
         continue;
     }
 
+    // When --extensions is used, skip the individual addon stubs — they are
+    // merged into docker/app/Dockerfile instead of being copied as separate
+    // reference files.
+    if ($extensions !== [] && in_array(basename($relativePath), $extensionStubs, true)) {
+        echo "[docker:init] skip   {$relativePath} (merged via --extensions)\n";
+        $skipped++;
+        continue;
+    }
+
     if (file_exists($targetPath)) {
         echo "[docker:init] skip   {$relativePath}\n";
         $skipped++;
@@ -124,12 +173,22 @@ foreach ($iterator as $item) {
         $content = uncommentEnvSections($content, $services);
     }
 
+    if (basename($relativePath) === 'Dockerfile' && $extensions !== []) {
+        $content = buildDockerfile($content, $stubsDir, $extensions);
+    }
+
     file_put_contents($targetPath, $content);
     echo "[docker:init] copy   {$relativePath}\n";
     $copied++;
 }
 
 echo "\n[docker:init] Done. {$copied} file(s) copied, {$skipped} skipped.\n";
+
+// ─── Merge extensions into the monorepo's shared root Dockerfile, if any ─────
+
+if ($extensions !== []) {
+    mergeRootDockerfileExtensions($projectRoot, $stubsDir, $extensions);
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -324,4 +383,115 @@ function uncommentEnvSections(string $content, array $services): string
     }
 
     return implode("\n", $result);
+}
+
+/**
+ * Build a merged docker/app/Dockerfile by injecting PHP extension install
+ * blocks from addon stubs right after the base FROM line.
+ *
+ * @param string       $base       Base Dockerfile content (placeholders already replaced).
+ * @param string       $stubsDir   Path to the stubs directory.
+ * @param list<string> $extensions Extensions to include (e.g. ['gd', 'imagick']).
+ *
+ * @return string
+ */
+function buildDockerfile(string $base, string $stubsDir, array $extensions): string
+{
+    $block = extensionInstallBlock($stubsDir, $extensions);
+
+    if ($block === '') {
+        return $base;
+    }
+
+    $lines = explode("\n", $base);
+
+    foreach ($lines as $index => $line) {
+        if (str_starts_with($line, 'FROM ')) {
+            array_splice($lines, $index + 1, 0, explode("\n", rtrim($block)));
+            break;
+        }
+    }
+
+    return implode("\n", $lines);
+}
+
+/**
+ * Concatenate the addon stub content for each requested extension.
+ *
+ * @param string       $stubsDir   Path to the stubs directory.
+ * @param list<string> $extensions Extensions to include (e.g. ['gd', 'imagick']).
+ *
+ * @return string
+ */
+function extensionInstallBlock(string $stubsDir, array $extensions): string
+{
+    $block = '';
+
+    foreach ($extensions as $extension) {
+        $file = $stubsDir . '/Dockerfile.' . $extension;
+
+        if (!is_file($file)) {
+            continue;
+        }
+
+        $block .= (string) file_get_contents($file);
+    }
+
+    return $block;
+}
+
+/**
+ * When run from inside a module directory of this monorepo (detected via a
+ * sibling packages.sh two directories up), merge any requested extension not
+ * already present into the shared root docker/app/Dockerfile — the container
+ * `composer full` at the root actually runs against, distinct from the
+ * module's own standalone image.
+ *
+ * Extensions already mentioned anywhere in the root Dockerfile (by name) are
+ * left untouched and reported as already present, rather than duplicated.
+ *
+ * @param string       $projectRoot Current working directory (a module root).
+ * @param string       $stubsDir    Path to the stubs directory.
+ * @param list<string> $extensions  Extensions requested (e.g. ['gd', 'imagick']).
+ *
+ * @return void
+ */
+function mergeRootDockerfileExtensions(string $projectRoot, string $stubsDir, array $extensions): void
+{
+    $monorepoRoot = dirname($projectRoot, 2);
+    $rootDockerfile = $monorepoRoot . '/docker/app/Dockerfile';
+
+    if (!is_file($monorepoRoot . '/packages.sh') || !is_file($rootDockerfile)) {
+        return;
+    }
+
+    $content = (string) file_get_contents($rootDockerfile);
+    $missing = array_values(array_filter(
+        $extensions,
+        static fn (string $extension): bool => !str_contains($content, $extension),
+    ));
+
+    if ($missing === []) {
+        echo '[docker:init] Root docker/app/Dockerfile already has: ' . implode(', ', $extensions) . "\n";
+
+        return;
+    }
+
+    $block = extensionInstallBlock($stubsDir, $missing);
+
+    if ($block === '') {
+        return;
+    }
+
+    $lines = explode("\n", $content);
+
+    foreach ($lines as $index => $line) {
+        if (str_starts_with($line, 'FROM au9500/php:')) {
+            array_splice($lines, $index + 1, 0, explode("\n", rtrim($block)));
+            break;
+        }
+    }
+
+    file_put_contents($rootDockerfile, implode("\n", $lines));
+    echo '[docker:init] Merged into root docker/app/Dockerfile: ' . implode(', ', $missing) . "\n";
 }
