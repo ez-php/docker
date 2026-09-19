@@ -318,6 +318,7 @@ Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced b
 - **No PHP library code in this package** — `bin/docker-init` and `bin/update-docker` are plain PHP scripts, not classes, and there is nothing to unit test in the traditional sense. The package intentionally has no `src/`, `phpstan.neon`, or `phpunit.xml`. `.php-cs-fixer.php` (targeting `bin/` only) is present, since those scripts are still real, style-checkable PHP source.
 
 ---
+- **This package is exempt from the standard module file set.** It is tooling, not a runtime package: it ships no `src/`, so it has no `phpstan.neon`, `phpunit.xml` or `tests/TestCase.php`; and it *is* the source of the Docker scaffold every other module copies, so it has no `.env.example`, `docker-compose.yml` or `docker/app/*` of its own (its `Dockerfile` and `image/` build the base image directly). Everything else in the required list (`composer.json`, `.php-cs-fixer.php`, `.gitignore`, CI workflow, `README.md`, `start.sh`, `CLAUDE.md`) still applies. The `/audit-modules` command encodes the same exemption.
 
 ## Testing Approach
 
