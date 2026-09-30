@@ -23,14 +23,15 @@ declare(strict_types=1);
  *
  * With --services, the requested service definitions are merged directly into
  * docker-compose.yml and the relevant sections in .env.example are uncommented.
- * The separate addon stubs (docker-compose.mysql.yml, docker-compose.redis.yml)
- * are skipped since their content is already incorporated.
+ * The addon stubs (docker-compose.mysql.yml, docker-compose.redis.yml, ...) are
+ * never copied as files: they are merge sources only, and a copy would sit in the
+ * module unused, pinned to the root stack's host ports.
  *
  * With --extensions, the requested PHP extension install blocks (apt packages +
  * docker-php-ext-install / pecl lines) are merged directly into docker/app/Dockerfile,
  * right after the base FROM line, the same way --services merges into
- * docker-compose.yml. The separate addon stubs (Dockerfile.gmp, Dockerfile.gd, ...)
- * are skipped since their content is already incorporated. When run from a module
+ * docker-compose.yml. The extension stubs (Dockerfile.gmp, Dockerfile.gd, ...)
+ * are likewise merge sources only and never copied. When run from a module
  * directory inside this monorepo (detected via a sibling packages.sh two levels up),
  * any extension not already present in the shared root docker/app/Dockerfile is
  * appended there too, since `composer full` at the root runs against that shared
@@ -111,8 +112,8 @@ if ($extensions !== []) {
 
 echo "\n";
 
-// ─── Addon stubs (merged into docker-compose.yml when --services is used, or ──
-// ─── into docker/app/Dockerfile when --extensions is used) ───────────────────
+// ─── Addon stubs (merge sources only: into docker-compose.yml via --services, ─
+// ─── into docker/app/Dockerfile via --extensions; never copied) ───────────────
 
 $addonStubs = ['docker-compose.mysql.yml', 'docker-compose.redis.yml', 'docker-compose.meilisearch.yml', 'docker-compose.memcached.yml', 'docker-compose.mailpit.yml'];
 $extensionStubs = ['Dockerfile.bcmath', 'Dockerfile.gmp', 'Dockerfile.gd', 'Dockerfile.imagick', 'Dockerfile.memcached', 'Dockerfile.apcu'];
@@ -141,20 +142,10 @@ foreach ($iterator as $item) {
         continue;
     }
 
-    // When --services is used, skip the individual addon stubs — they are merged
-    // into docker-compose.yml instead of being copied as separate override files.
-    if ($services !== [] && in_array(basename($relativePath), $addonStubs, true)) {
-        echo "[docker:init] skip   {$relativePath} (merged via --services)\n";
-        $skipped++;
-        continue;
-    }
-
-    // When --extensions is used, skip the individual addon stubs — they are
-    // merged into docker/app/Dockerfile instead of being copied as separate
-    // reference files.
-    if ($extensions !== [] && in_array(basename($relativePath), $extensionStubs, true)) {
-        echo "[docker:init] skip   {$relativePath} (merged via --extensions)\n";
-        $skipped++;
+    // Addon and extension stubs are merge sources for --services / --extensions,
+    // never files of their own: copied unrequested, they would sit in the module
+    // unused (and on the root stack's host ports). They are not counted as skipped.
+    if (in_array(basename($relativePath), $addonStubs, true) || in_array(basename($relativePath), $extensionStubs, true)) {
         continue;
     }
 

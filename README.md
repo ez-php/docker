@@ -74,15 +74,16 @@ composer docker:init
 | Stub file | Purpose |
 |---|---|
 | `Dockerfile` | `FROM au9500/php:8.5` — minimal module image |
-| `docker-compose.yml` | App service only |
-| `docker-compose.mysql.yml` | MySQL service addon (merge as needed) |
-| `docker-compose.redis.yml` | Redis service addon (merge as needed) |
-| `docker-compose.meilisearch.yml` | Meilisearch service addon (merge as needed) |
+| `docker-compose.yml` | App service, plus the services requested via `--services` |
 | `.env.example` | Env var template |
 | `start.sh` | Convenience script: copies `.env`, starts compose, opens shell |
 | `docker/db/create-db.sh` | MySQL init script: creates main + testing databases |
 
 Existing files are never overwritten — safe to re-run after customisation.
+
+The service addons (`docker-compose.{mysql,redis,meilisearch,memcached,mailpit}.yml`) and
+extension blocks (`Dockerfile.{bcmath,gmp,gd,imagick,memcached,apcu}`) are merge sources for
+`--services` / `--extensions` only — they are never copied into the project.
 
 ### Updating existing Docker files
 
@@ -101,15 +102,14 @@ The script reads the package name from `composer.json` and replaces all `{{MODUL
 
 ### Combining compose files
 
-If you scaffolded without `--services`, the addons stay as separate files and can
-be layered with `-f`:
+With `--services` the requested services are merged into `docker-compose.yml` for you.
+To add a service later, copy its addon from `vendor/ez-php/docker/stubs/` into the project
+(replace `{{MODULE_NAME}}`, set a unique host port) and either merge it into
+`docker-compose.yml` or layer it with `-f`:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.mysql.yml -f docker-compose.redis.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d
 ```
-
-Or merge the relevant services manually into `docker-compose.yml`. With
-`--services` this is already done for you.
 
 ---
 

@@ -30,6 +30,9 @@ jobs:
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
+      - name: Composer audit
+        run: composer audit
+
       - name: Run CS Fixer (check only)
         run: vendor/bin/php-cs-fixer fix --dry-run --diff
 

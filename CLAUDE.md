@@ -313,7 +313,7 @@ Build args: `WWWUSER` (default 1000), `WWWGROUP` (default 1000) — creates the 
 PHP executable (listed in `"bin"` in `composer.json`). When run from a project root:
 
 1. Reads `composer.json` to derive the module name (last segment of `"name"` field)
-2. Copies all files from `stubs/` to the project root
+2. Copies the files from `stubs/` to the project root — except the `docker-compose.<service>.yml` / `Dockerfile.<extension>` addons, which are only merged when requested via `--services` / `--extensions`
 3. Replaces `{{MODULE_NAME}}` in file contents with the derived name
 4. Skips files that already exist (safe to re-run)
 
@@ -321,7 +321,7 @@ PHP executable (listed in `"bin"` in `composer.json`). When run from a project r
 
 Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced by `docker-init` with the derived package name (e.g., `ez-php/cache` → `cache`).
 
-- `docker-compose.mysql.yml`, `docker-compose.redis.yml` and `docker-compose.meilisearch.yml` are addons — merged into `docker-compose.yml` by `--services`, or usable via `-f` flags
+- The `docker-compose.<service>.yml` addons and `Dockerfile.<extension>` blocks are merge sources only — merged into `docker-compose.yml` by `--services` / into `docker/app/Dockerfile` by `--extensions`, and never copied as files. Copying them unrequested used to leave unused fragments (pinned to the root stack's host ports) in a dozen modules
 - `docker/db/create-db.sh` is only needed when the MySQL stub is used
 
 ---
