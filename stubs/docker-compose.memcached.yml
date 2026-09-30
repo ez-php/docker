@@ -1,0 +1,11 @@
+services:
+
+  app:
+    depends_on:
+      memcached:
+        condition: service_started
+
+  # Reached as memcached:11211 over the Compose network only — no host port published.
+  memcached:
+    image: memcached:1.6-alpine
+    container_name: ez-php-{{MODULE_NAME}}-memcached

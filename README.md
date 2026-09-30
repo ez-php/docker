@@ -51,6 +51,8 @@ vendor/bin/docker-init --services=mysql
 vendor/bin/docker-init --services=redis
 vendor/bin/docker-init --services=meilisearch
 vendor/bin/docker-init --services=mysql,meilisearch
+vendor/bin/docker-init --services=memcached,mailpit
+vendor/bin/docker-init --extensions=memcached,apcu
 ```
 
 Supported services: `mysql`, `redis`, `meilisearch`.

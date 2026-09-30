@@ -1,0 +1,17 @@
+services:
+
+  app:
+    depends_on:
+      mailpit:
+        condition: service_started
+
+  mailpit:
+    image: axllent/mailpit
+    container_name: ez-php-{{MODULE_NAME}}-mailpit
+    ports:
+      - "${MAILPIT_SMTP_HOST_PORT:-1025}:1025"
+      - "${MAILPIT_API_HOST_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: 50
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
