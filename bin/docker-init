@@ -26,6 +26,8 @@ declare(strict_types=1);
  * The addon stubs (docker-compose.mysql.yml, docker-compose.redis.yml, ...) are
  * never copied as files: they are merge sources only, and a copy would sit in the
  * module unused, pinned to the root stack's host ports.
+ * docker/db/ (the MySQL init script the mysql addon mounts) is copied only with
+ * --services=mysql, for the same reason.
  *
  * With --extensions, the requested PHP extension install blocks (apt packages +
  * docker-php-ext-install / pecl lines) are merged directly into docker/app/Dockerfile,
@@ -133,6 +135,13 @@ foreach ($iterator as $item) {
     /** @var SplFileInfo $item */
     $relativePath = substr((string) $item->getPathname(), strlen($stubsDir) + 1);
     $targetPath = $projectRoot . '/' . $relativePath;
+
+    // docker/db/ only serves the MySQL service (its init script is mounted by
+    // docker-compose.mysql.yml): without --services=mysql it would sit in the module
+    // unused, so neither the directory nor its files are created.
+    if (!in_array('mysql', $services, true) && ($relativePath === 'docker/db' || str_starts_with($relativePath, 'docker/db/'))) {
+        continue;
+    }
 
     if ($item->isDir()) {
         if (!is_dir($targetPath)) {

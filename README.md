@@ -77,7 +77,7 @@ composer docker:init
 | `docker-compose.yml` | App service, plus the services requested via `--services` |
 | `.env.example` | Env var template |
 | `start.sh` | Convenience script: copies `.env`, starts compose, opens shell |
-| `docker/db/create-db.sh` | MySQL init script: creates main + testing databases |
+| `docker/db/create-db.sh` | MySQL init script: creates main + testing databases (only with `--services=mysql`) |
 
 Existing files are never overwritten — safe to re-run after customisation.
 
