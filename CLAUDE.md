@@ -151,7 +151,7 @@ php make_module.php <name> --description="..." --services=mysql,redis --extensio
 
 `<name>` is the kebab-case package name; the namespace is derived as
 `EzPhp\<PascalCase>` (each `-`-separated word upper-cased) unless `--namespace=`
-overrides it. Existing exceptions the guess gets wrong: `asyncapi` → `AsyncApi`,
+overrides it. Existing exceptions the guess gets wrong: `asyncapi` → `AsyncApi`, `asyncapi-ui` → `AsyncApiUi`,
 `bignum` → `BigNum`, `dataloader` → `DataLoader`, `dotenv` → `Env`, `graphql` → `GraphQL`, `graphql-subscriptions` → `GraphQLSubscriptions`, `oauth` → `OAuth`,
 `opcache` → `OPCache`, `openapi` → `OpenApi`, `qrcode` → `QrCode`, `swagger-ui` → `SwaggerUI`, `webauthn` → `WebAuthn` and
 `websocket` → `WebSocket`; `websocket-client` → `WebsocketClient`, `websocket-tls` → `WebsocketTls`,
@@ -338,8 +338,6 @@ Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced b
 - **Service addons are data, not code paths** — Adding a service means dropping a `docker-compose.<name>.yml` stub, adding a commented block to `.env.example` marked `requires <Name>:`, and listing the name in `$knownServices`/`$addonStubs`/`buildCompose()`. Meilisearch was added this way; its stub mirrors the working configuration in `modules/search/docker-compose.yml` rather than being invented, so a scaffolded module matches a setup known to run.
 - **Stubs are one-time scaffolding** — Once copied, files belong to the module and are edited freely. Updates to stubs only affect new modules. No auto-sync mechanism.
 - **No PHP library code in this package** — `bin/docker-init` and `bin/update-docker` are plain PHP scripts, not classes, and there is nothing to unit test in the traditional sense. The package intentionally has no `src/`, `phpstan.neon`, or `phpunit.xml`. `.php-cs-fixer.php` (targeting `bin/` only) is present, since those scripts are still real, style-checkable PHP source.
-
----
 - **This package is exempt from the standard module file set.** It is tooling, not a runtime package: it ships no `src/`, so it has no `phpstan.neon`, `phpunit.xml` or `tests/TestCase.php`; and it *is* the source of the Docker scaffold every other module copies, so it has no `.env.example`, `docker-compose.yml` or `docker/app/*` of its own (its `Dockerfile` and `image/` build the base image directly). Everything else in the required list (`composer.json`, `.php-cs-fixer.php`, `.gitignore`, CI workflow, `README.md`, `start.sh`, `CLAUDE.md`) still applies. The `/audit-modules` command encodes the same exemption.
 
 ## Testing Approach
