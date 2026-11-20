@@ -30,7 +30,7 @@ declare(strict_types=1);
  * --services=mysql, for the same reason.
  *
  * With --extensions, the requested PHP extension install blocks (apt packages +
- * docker-php-ext-install / pecl lines) are merged directly into docker/app/Dockerfile,
+ * docker-php-ext-install / pie lines) are merged directly into docker/app/Dockerfile,
  * right after the base FROM line, the same way --services merges into
  * docker-compose.yml. The extension stubs (Dockerfile.gmp, Dockerfile.gd, ...)
  * are likewise merge sources only and never copied. When run from a module
@@ -426,6 +426,13 @@ function buildDockerfile(string $base, string $stubsDir, array $extensions): str
 /**
  * Concatenate the addon stub content for each requested extension.
  *
+ * Every PIE-based stub (imagick, memcached, apcu) brings its own
+ * `COPY --from=ghcr.io/php/pie... /pie /usr/bin/pie` line so it works on its
+ * own; when several are merged, only the first copy of that line is kept.
+ * A COPY already present in the target file is deliberately not stripped:
+ * the block is inserted right after FROM, i.e. before it, so the block must
+ * stay self-sufficient (a second COPY of the same file is harmless).
+ *
  * @param string       $stubsDir   Path to the stubs directory.
  * @param list<string> $extensions Extensions to include (e.g. ['gd', 'imagick']).
  *
@@ -434,6 +441,7 @@ function buildDockerfile(string $base, string $stubsDir, array $extensions): str
 function extensionInstallBlock(string $stubsDir, array $extensions): string
 {
     $block = '';
+    $pieCopied = false;
 
     foreach ($extensions as $extension) {
         $file = $stubsDir . '/Dockerfile.' . $extension;
@@ -442,7 +450,21 @@ function extensionInstallBlock(string $stubsDir, array $extensions): string
             continue;
         }
 
-        $block .= (string) file_get_contents($file);
+        $lines = [];
+
+        foreach (explode("\n", (string) file_get_contents($file)) as $line) {
+            if (str_starts_with($line, 'COPY --from=ghcr.io/php/pie')) {
+                if ($pieCopied) {
+                    continue;
+                }
+
+                $pieCopied = true;
+            }
+
+            $lines[] = $line;
+        }
+
+        $block .= implode("\n", $lines);
     }
 
     return $block;

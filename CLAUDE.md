@@ -210,7 +210,7 @@ vendor/bin/docker-init --services=mysql,redis
 vendor/bin/docker-init --services=memcached,mailpit
 ```
 
-Pass `--extensions` to merge PHP extension install blocks (apt packages plus `docker-php-ext-install`/`pecl` lines) directly into `docker/app/Dockerfile`, instead of hand-editing it afterward — supported extensions: `bcmath`, `gmp`, `gd`, `imagick`, `memcached`, `apcu` (with `apc.enable_cli=1`):
+Pass `--extensions` to merge PHP extension install blocks (apt packages plus `docker-php-ext-install`/`pie install` lines) directly into `docker/app/Dockerfile`, instead of hand-editing it afterward — supported extensions: `bcmath`, `gmp`, `gd`, `imagick`, `memcached`, `apcu` (with `apc.enable_cli=1`):
 
 ```
 vendor/bin/docker-init --extensions=gmp,bcmath
@@ -332,6 +332,7 @@ Template files for new modules. All `{{MODULE_NAME}}` occurrences are replaced b
 
 - **`php:8.5-cli` base, not `php:8.5-fpm`** — Modules only run tests via CLI. The full application template (`ez-php/`) keeps its own Dockerfile with nginx + php-fpm + supervisor. Basing on cli keeps the image smaller and purpose-clear.
 - **All extensions in the base image** — Including all possible extensions (redis, pdo_mysql, etc.) means a module never has to branch on "does my CI have redis installed?". Size trade-off is acceptable for a dev image.
+- **PECL extensions are installed with PIE, not `pecl`** — the official `php:8.6` images no longer ship `pecl`, and PIE (`ghcr.io/php/pie`, pinned to a release tag, never the floating `:bin`) is its official successor; it also enables the extension, so no `docker-php-ext-enable`. Every Dockerfile that runs `pie install` — this base image, the `Dockerfile.{imagick,memcached,apcu}` stubs, the root image and the module images — copies the binary in itself instead of relying on the base image: module CI and the root stack build `FROM au9500/php:8.5` as published on Docker Hub, so a Dockerfile that expected `pie` from the base would break until a new base image was released. `docker-init` keeps only the first PIE `COPY` line when it merges several stubs. `apc.enable_cli=1` goes into its own `99-apcu-cli.ini`, since PIE names the extension's ini file itself. PIE fetches sources from GitHub, not pecl.php.net.
 - **Both `pcov` and `xdebug`** — `pcov` is faster for coverage-only runs; `xdebug` is needed for step debugging. Including both avoids forcing a choice. Coverage tools default to `xdebug` mode; `pcov` can be activated via `XDEBUG_MODE=off`.
 - **`container-start.sh` baked in** — The default `sleep infinity` entrypoint means a module container stays alive for `docker compose exec` without running a server. The full app overrides this with supervisord in its own Dockerfile.
 - **`{{MODULE_NAME}}` placeholder** — Container names must be unique across modules on the same host. The placeholder is replaced at init time from `composer.json`. No interactive prompts.

@@ -16,17 +16,18 @@ RUN apt-get update && apt-get install -y \
     && docker-php-ext-install pdo_mysql mbstring zip intl \
     && rm -rf /var/lib/apt/lists/*
 
+# PIE (PHP Installer for Extensions) — successor to pecl, which the official
+# php images drop from 8.6 on; installs and enables extensions in one step
+COPY --from=ghcr.io/php/pie:1.5.5-bin /pie /usr/bin/pie
+
 # Install Redis PHP extension
-RUN pecl install redis \
-    && docker-php-ext-enable redis
+RUN pie install phpredis/phpredis
 
 # Install PCOV for fast code coverage
-RUN pecl install pcov \
-    && docker-php-ext-enable pcov
+RUN pie install pecl/pcov
 
 # Install Xdebug for step debugging
-RUN pecl install xdebug \
-    && docker-php-ext-enable xdebug
+RUN pie install xdebug/xdebug
 
 # Install Node.js 20 (optional — set WITH_NODE=true to activate)
 RUN if [ "$WITH_NODE" = "true" ]; then \
